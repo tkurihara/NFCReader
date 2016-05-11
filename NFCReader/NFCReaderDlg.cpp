@@ -91,6 +91,7 @@ BEGIN_MESSAGE_MAP(CNFCReaderDlg, CDialogEx)
 	ON_WM_PAINT()
 	ON_WM_QUERYDRAGICON()
 	ON_BN_CLICKED(IDC_BTN_READ, &CNFCReaderDlg::OnBnClickedBtnRead)
+	ON_BN_CLICKED(IDC_BTN_READBLOCK, &CNFCReaderDlg::OnBnClickedBtnReadblock)
 END_MESSAGE_MAP()
 
 
@@ -269,7 +270,7 @@ void CNFCReaderDlg::OnBnClickedBtnRead()
 	str.Format(_T(""));
 	for (UINT uiRespIdx = 0; uiRespIdx < dwResponseSize; uiRespIdx ++) {
 		//_ftprintf_s(stdout, _T("%02X"), bRecvBuf[uiRespIdx]);
-		tmp.Format(_T("%02X"), bRecvBuf[uiRespIdx]);
+		tmp.Format(_T("%02X "), bRecvBuf[uiRespIdx]);
 		str += tmp;
 		//str.SetAt(uiRespIdx, str.GetString());
 		/*if ((uiRespIdx + 1) >= dwResponseSize) {
@@ -284,7 +285,119 @@ void CNFCReaderDlg::OnBnClickedBtnRead()
 	::SCardDisconnect(hCard, SCARD_LEAVE_CARD);	
 	::SCardFreeMemory(hContext, lpszReaderName);
 	::SCardReleaseContext(hContext);
+}
 
 
+void CNFCReaderDlg::OnBnClickedBtnReadblock()
+{
+	CEdit *ed=(CEdit*)GetDlgItem(IDC_ED_IDM);
+	ed->SetWindowTextW(_T(""));
+	CEdit *edMem=(CEdit*)GetDlgItem(IDC_ED_BLOCK);
+	edMem->SetWindowTextW(_T(""));
 
+	SCARDCONTEXT	hContext = 0;
+	LONG lResult = ::SCardEstablishContext(SCARD_SCOPE_USER, NULL, NULL, &hContext);
+	CString str;
+
+	if (lResult != SCARD_S_SUCCESS) {
+		if (lResult == SCARD_E_NO_SERVICE) {
+			//_ftprintf_s(stdout, _T("Smart Card Servise is not Started.\n"));
+			AfxMessageBox(_T("Smart Card Servise is not Started.\n"));
+		} else {
+			//_ftprintf_s(stdout, _T("SCardEstablishContext Error.\nErrorCode %08X\n"), lResult);
+			AfxMessageBox(_T("SCardEstablishContext Error.\nErrorCode[]\n"));
+		}
+		//return EXIT_FAILURE;
+		return;
+	}
+
+	LPTSTR	lpszReaderName = NULL;
+	DWORD	dwAutoAllocate = SCARD_AUTOALLOCATE;
+	TCHAR	*pszExpectedReaderName = _T("Sony FeliCa Port/PaSoRi 3.0");
+
+	lResult = ::SCardListReaders(hContext, NULL, (LPTSTR)&lpszReaderName, &dwAutoAllocate);
+//	str.Format(_T("code=%d"), lResult);
+//	AfxMessageBox(str);
+	if (lResult != SCARD_S_SUCCESS) {
+		if (lResult == SCARD_E_NO_READERS_AVAILABLE)  {
+			//_ftprintf_s(stdout, _T("Reader/Writer is not Found.\n"));
+			str.Format(_T("Reader/Writer is not Found.\n"));
+		} else {
+			//_ftprintf_s(stdout, _T("Reader/Writer is not Found.\n"));_T("SCardListReaders Error.\nErrorCode %08X\n"), lResult);
+			str.Format(_T("SCardListReaders Error.\nErrorCode %08X\n"), lResult);
+		}
+		AfxMessageBox(str);
+		::SCardReleaseContext(hContext);
+		//return EXIT_FAILURE;
+		return;
+	}
+	if (_tcsncmp(pszExpectedReaderName, lpszReaderName, _tcslen(pszExpectedReaderName)) != 0) {
+		//_ftprintf_s(stdout, _T("Reader/Writer is not Found.\n"));
+		str.Format( _T("Reader/Writer is not Found.\n"));
+		::SCardFreeMemory(hContext, lpszReaderName);
+		::SCardReleaseContext(hContext);
+		//return EXIT_FAILURE;		
+		return;
+	}
+
+	// ****   Connect to NFC Carad   *******
+	SCARDHANDLE	hCard = NULL;
+	DWORD		dwActiveProtocol = 0;
+	lResult = ::SCardConnect(hContext, lpszReaderName, SCARD_SHARE_SHARED, SCARD_PROTOCOL_T0 | SCARD_PROTOCOL_T1, &hCard, &dwActiveProtocol);
+	if (lResult != SCARD_S_SUCCESS) {
+		if (lResult == SCARD_W_REMOVED_CARD) {
+			//_ftprintf_s(stdout, _T("Card is not Found.\n"));
+			str.Format(_T("Card is not Found.\n"));
+		} else {
+			//_ftprintf_s(stdout, _T("SCardConnect Error.\nErrorCode %08X\n"), lResult);
+			str.Format(_T("SCardConnect Error.\nErrorCode %08X\n"), lResult);
+		}
+		AfxMessageBox(str);
+		::SCardFreeMemory(hContext, lpszReaderName);
+		::SCardReleaseContext(hContext);
+		//return EXIT_FAILURE;		
+		return;
+	}
+
+	//  ******  独自拡張コマンド　p.31(PDF)    *********
+//	BYTE	bSendCommand[] = {0xFF, 0xCA, 0x00, 0x00, 0x00}; //UID
+//	BYTE	bSendCommand[] = {0xFF, 0xCA, 0xF0, 0x00, 0x00}; //card識別ID（１バイト） =>F0
+//	BYTE	bSendCommand[] = {0xFF, 0xCA, 0xF1, 0x00, 0x00}; //card名称 =>Felica
+//	BYTE	bSendCommand[] = {0xFF, 0xCA, 0xF2, 0x00, 0x00}; //通信速度 => 424kbps
+//	BYTE	bSendCommand[] = {0xFF, 0xCA, 0xF3, 0x00, 0x00, 0x00, 0x00}; //カード種別 => Felica
+	BYTE	bSendCommand[] = {0xFF, 0xCA, 0xF4, 0x00, 0x00, 0x00, 0x00}; //カード種別名称 => Felica
+//	BYTE	bSendCommand[] = {0xFF, 0xCA, 0xF9, 0x00, 0x00, 0x00, 0x00}; //NFC-DEP通信状態
+
+	//  ******　ブロックリード    *********
+//BYTE	bSendCommand[] = {0xFF, 0xB0, 0x00, 0x00, 0x00};
+
+
+	BYTE	bRecvBuf[PCSC_RECV_BUFF_LEN] = {0x00};
+	DWORD	dwResponseSize = sizeof(bRecvBuf);
+	lResult = ::SCardTransmit(hCard, CardProtocol2PCI(dwActiveProtocol), bSendCommand, sizeof(bSendCommand), NULL, bRecvBuf, &dwResponseSize);
+	if (lResult != SCARD_S_SUCCESS) {
+		//_ftprintf_s(stdout, _T("SCardTransmit Error.\nErrorCode %08X\n"), lResult);
+		str.Format(_T("SCardTransmit Error.\nErrorCode %08X\n"), lResult);
+		AfxMessageBox(str);
+		::SCardDisconnect(hCard, SCARD_LEAVE_CARD);	
+		::SCardFreeMemory(hContext, lpszReaderName);
+		::SCardReleaseContext(hContext);
+		//return EXIT_FAILURE;
+		return;
+	}
+	CString tmp;
+	str.Format(_T(""));
+	for (UINT uiRespIdx = 0; uiRespIdx < dwResponseSize; uiRespIdx ++) {
+		//_ftprintf_s(stdout, _T("%02X"), bRecvBuf[uiRespIdx]);
+		//tmp.Format(_T("%02X "), bRecvBuf[uiRespIdx]);
+		tmp.Format(_T("%c "), bRecvBuf[uiRespIdx]);					//カード名称を文字列に
+		str += tmp;
+	}
+	//AfxMessageBox(str);
+	edMem->SetWindowText(str);
+	edMem->UpdateWindow();
+
+	::SCardDisconnect(hCard, SCARD_LEAVE_CARD);	
+	::SCardFreeMemory(hContext, lpszReaderName);
+	::SCardReleaseContext(hContext);
 }
